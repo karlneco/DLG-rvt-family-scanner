@@ -26,6 +26,10 @@ namespace StructuredStorage
             try
             {
                 StreamInfo[] partitions = Storage.GetSubStorageInfo("Partitions").GetStreams();
+                if (partitions.Length > 1)
+                {
+                    Console.WriteLine("hold it");
+                }
                 foreach (StreamInfo p in partitions)
                 {
                     CrcStream partitionStream = new CrcStream(p.GetStream());

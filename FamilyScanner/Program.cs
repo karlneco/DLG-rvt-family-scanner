@@ -5,18 +5,24 @@ using System.Collections.Specialized;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace FamilyScanner
 {
     class Program
     {
+        //private static object _sync = new object();
+
         public static System.Diagnostics.Stopwatch timer = System.Diagnostics.Stopwatch.StartNew();
 
-        public static OrderedDictionary FamilyRoots = new OrderedDictionary();
 
         static void Main(string[] args)
         {
-            
+
+            OrderedDictionary FamilyRoots = new OrderedDictionary();
+            List<Tuple<string, string, Storage>> bucket = new List<Tuple<string, string, Storage>>();
+            object _sync = new object();
+
             //if there are no directories on the command line just die
             if (args.Length < 1)
             {
@@ -31,36 +37,47 @@ namespace FamilyScanner
             string rootCRC = "";
 
             Console.WriteLine("Found {0} Revit families to process", FilesInPath.Length);
-            foreach (string file in FilesInPath)
+            Parallel.ForEach(FilesInPath, (file) =>
             {
+
                 //Console.WriteLine("\nProcessing {0}...", file);
                 Storage storage = new Storage(file);
                 //is this a valid revit (family) file? If not then just skip and move on to the next one
                 if (storage.IsInitialized == false)
                 {
                     Console.WriteLine("[ERROR] {0} doesn't seem to be a valid Family", file);
-                    continue;
+                }
+                else
+                {
+
+                    //get the CRC of the root partition of the family
+                    rootCRC = (string)storage.PartitionsInfo.Partitions[0];
+                    //Console.WriteLine("CRC of partition 0: {0}", rootCRC);
                 }
 
-                //get the CRC of the root partition of the family
-                rootCRC = (string)storage.PartitionsInfo.Partitions[0];
-                //Console.WriteLine("CRC of partition 0: {0}", rootCRC);
+                bucket.Add(Tuple.Create(rootCRC, file, storage));
 
-                //find the root of the family tree, if there is no tree for this root, start a new tree
-                //and send the family in for generating the tree
+
+            });
+
+            //find the root of the family tree, if there is no tree for this root, start a new tree
+            //and send the family in for generating the tree
+            foreach (Tuple<string, string, Storage> fam in bucket)
+            {
                 FamilyNode f = null;
                 try
                 {
-                    f = (FamilyNode)FamilyRoots[rootCRC];
-                    f.AddChild(rootCRC, file, storage); //this will trace the tree internaly
+                    f = (FamilyNode)FamilyRoots[fam.Item1];
+                    f.AddChild(fam.Item1, fam.Item2, fam.Item3); //this will trace the tree internaly
                 }
                 catch
                 {
                     //no tree exists for this CRC
-                    f = new FamilyNode(rootCRC, file, storage);
-                    FamilyRoots.Add(rootCRC, f);
+                    f = new FamilyNode(fam.Item1, fam.Item2, fam.Item3);
+                    FamilyRoots.Add(fam.Item1, f);
                 }
             }
+
 
 
             //display the tree of results
@@ -88,7 +105,7 @@ namespace FamilyScanner
 
     class FamilyNode
     {
-        Hashtable Decendants = new Hashtable();
+        OrderedDictionary Decendants = new OrderedDictionary();
         public List<string> files = new List<string>();
 
         public string rootCRC;
@@ -98,9 +115,19 @@ namespace FamilyScanner
         public FamilyNode(string rootCRC, string file, Storage storage)
         {
             this.rootCRC = rootCRC;
-            files.Add(file);
+            
             this.storage = storage;
-            //AddChild()
+
+
+            if (storage.PartitionsInfo.Partitions.Count>1) 
+            {
+                //this part is not tested as the Clarity Harvester compacts the families so there is never more than one partition
+                AddChild(rootCRC, file, storage);
+            }
+            else
+            {
+                files.Add(file);
+            }
         }
 
         internal void AddChild(string rootCRC, string file, Storage storage)
